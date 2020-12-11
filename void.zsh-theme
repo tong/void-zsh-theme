@@ -3,145 +3,82 @@
 
 DEFAULT_USER="tong"
 CURRENT_BG='NONE'
+PRIMARY_FG=black
 
-## Special Powerline characters
-() {
-    local LC_ALL="" LC_CTYPE="en_US.UTF-8"
-    SEGMENT_SEPARATOR=$'\ue0b0'
-}
+# Icons
+SEGMENT_SEPARATOR="\ue0b0"
+PLUSMINUS="\u00b1"
+BRANCH="\ue0a0"
+DETACHED="\u27a6"
+CROSS="✖"
+LIGHTNING="⚡"
+GEAR="\u2699"
 
-## Begin a segment,takes two optional arguments, background and foreground
+## Begin a segment
+# Takes two arguments, background and foreground. Both can be omitted, rendering default background/foreground.
 prompt_segment() {
     local bg fg
     [[ -n $1 ]] && bg="%K{$1}" || bg="%k"
     [[ -n $2 ]] && fg="%F{$2}" || fg="%f"
     if [[ $CURRENT_BG != 'NONE' && $1 != $CURRENT_BG ]]; then
-        echo -n " %{$bg%F{$CURRENT_BG}%}$SEGMENT_SEPARATOR%{$fg%} "
+        print -n "%{$bg%F{$CURRENT_BG}%}$SEGMENT_SEPARATOR%{$fg%}"
     else
-        echo -n "%{$bg%}%{$fg%} "
+        print -n "%{$bg%}%{$fg%}"
     fi
     CURRENT_BG=$1
-    [[ -n $3 ]] && echo -n $3
+    [[ -n $3 ]] && print -n $3
 }
 
-##### Prompt components
-
-## Time: H:M
-prompt_time() {
-    prompt_segment white black "$(date +%R:%S)"
-}
-
-## Context: user@hostname
-prompt_context() {
-    if [[ "$USER" != "$DEFAULT_USER" || -n "$SSH_CLIENT" ]]; then
-        prompt_segment black default "%(!.%{%F{yellow}%}.)$USER@%m"
+## End the prompt, closing any open segments
+prompt_end() {
+    if [[ -n $CURRENT_BG ]]; then
+        print -n "%{%k%F{$CURRENT_BG}%}$SEGMENT_SEPARATOR"
     else
-        prompt_segment black default ""
+        print -n "%{%k%}"
     fi
+    print -n "%{%f%}"
+    CURRENT_BG=''
 }
 
-## Dir: current working directory
-prompt_dir() {
-    case "$PWD" in
-        # $HOME*)
-        #     prompt_segment blue black '%~'
-        # ;;
-        $HOME/doc*)
-            prompt_segment blue black ' %~'
-        ;;
-        $HOME/downloads*)
-            prompt_segment blue black '  %~'
-        ;;
-        $HOME/music*)
-            prompt_segment blue black '  %~'
-        ;;
-        $HOME/img*)
-            prompt_segment blue black '  %~'
-        ;;
-        $HOME/videos*)
-            prompt_segment blue black '  %~'
-        ;;
-        $HOME/.config*)
-            prompt_segment blue black '  %~'
-        ;;
-    	$HOME/dev*)
-            prompt_segment black grey ' %~'
-        ;;
-        $HAXELIB_PATH)
-            prompt_segment yellow black '●  %~'
-        ;;
-        $HAXELIB_PATH/*)
-            local lib=$(basename "$PWD")
-            local version=""
-            if [ -f .current ]; then
-                version=$(cat .current)
-                if [[ $version == *"dev"* ]]; then
-                    version=$(cat .dev)
-                fi
-            else
-                if [ -f .dev ]; then
-                    version=$(cat .dev)
-                fi
-            fi
-            prompt_segment yellow black "  haxelib/$lib"
-            prompt_segment black yellow "$version"
+### Prompt components
 
-            #if [ -f "$PWD/run.n" ]; then
-            #    prompt_segment black yellow " "
-            #fi
-        ;;
-    	*)
-            prompt_segment white black '%~'
-        ;;
-    esac
+## Context: user@hostname (who am I and where am I)
+prompt_context() {
+    local user=`whoami`
+    
+    if [[ "$user" != "$DEFAULT_USER" || -n "$SSH_CONNECTION" ]]; then
+        prompt_segment $PRIMARY_FG default " %(!.%{%F{yellow}%}.)$user@%m "
+    fi
 }
 
 ## Git: branch/detached head, dirty status
 prompt_git() {
-
-    local PL_BRANCH_CHAR
-    () {
-        local LC_ALL="" LC_CTYPE="en_US.UTF-8"
-        PL_BRANCH_CHAR=$''         # 
+    local color ref
+    is_dirty() {
+        test -n "$(git status --porcelain --ignore-submodules)"
     }
-
-    local ref dirty mode repo_path
-    repo_path=$(git rev-parse --git-dir 2>/dev/null)
-
-    if $(git rev-parse --is-inside-work-tree >/dev/null 2>&1); then
-
-        dirty=$(parse_git_dirty)
-        ref=$(git symbolic-ref HEAD 2> /dev/null) || ref="➦ $(git rev-parse --short HEAD 2> /dev/null)"
-
-        if [[ -n $dirty ]]; then
-            prompt_segment yellow black
+    ref="$vcs_info_msg_0_"
+    if [[ -n "$ref" ]]; then
+        if is_dirty; then
+            color=yellow
+            ref="${ref} $PLUSMINUS"
         else
-            prompt_segment green black
+            color=green
+            ref="${ref} "
         fi
-
-        if [[ -e "${repo_path}/BISECT_LOG" ]]; then
-            mode=" <B>"
-        elif [[ -e "${repo_path}/MERGE_HEAD" ]]; then
-            mode=" >M<"
-        elif [[ -e "${repo_path}/rebase" || -e "${repo_path}/rebase-apply" || -e "${repo_path}/rebase-merge" || -e "${repo_path}/../.dotest" ]]; then
-            mode=" >R>"
+        if [[ "${ref/.../}" == "$ref" ]]; then
+            ref="$BRANCH $ref"
+        else
+            ref="$DETACHED ${ref/.../}"
         fi
-
-        setopt promptsubst
-        autoload -Uz vcs_info
-
-        zstyle ':vcs_info:*' enable git
-        zstyle ':vcs_info:*' get-revision true
-        zstyle ':vcs_info:*' check-for-changes true
-        zstyle ':vcs_info:*' stagedstr 'ཧ'
-        zstyle ':vcs_info:*' unstagedstr ''
-        zstyle ':vcs_info:*' formats ' %u%c'
-        zstyle ':vcs_info:*' actionformats ' %u%c'
-
-        vcs_info
-
-        echo -n "${ref/refs\/heads\//$PL_BRANCH_CHAR }${vcs_info_msg_0_%% }${mode}"
+        prompt_segment $color $PRIMARY_FG
+        print -Pn " $ref"
     fi
+}
+
+## Time: H:M
+prompt_time() {
+    prompt_segment white black "$(date +%R:%S)"
 }
 
 ## Virtualenv: current working virtualenv
@@ -152,30 +89,27 @@ prompt_virtualenv() {
     fi
 }
 
-## Status:
-## - was there an error
-## - am I root
-## - are there background jobs?
-prompt_status() {
-    local symbols
-    symbols=()
-    [[ $RETVAL -ne 0 ]] && symbols+="%{%F{red}%}"
-    [[ $UID -eq 0 ]] && symbols+="%{%F{yellow}%}⚡"
-    [[ $(jobs -l | wc -l) -gt 0 ]] && symbols+="%{%F{cyan}%}⚙"
-    if [[ -n "$symbols"  ]]; then
-        prompt_segment black default "$symbols"
-    fi
-}
-
-## End the prompt, closing any open segments
-prompt_end() {
-    if [[ -n $CURRENT_BG ]]; then
-        echo -n " %{%k%F{$CURRENT_BG}%}$SEGMENT_SEPARATOR"
-    else
-        echo -n "%{%k%}"
-    fi
-    echo -n "%{%f%}"
-    CURRENT_BG=''
+## Cwd
+prompt_dir() {
+    case "$PWD" in
+        $HOME/bin*)
+            prompt_segment blue $PRIMARY_FG '  %~'
+        ;;
+        $HOME/dev*)
+            prompt_segment black grey ' ● %~'
+        ;;
+        $HOME/doc*)
+            prompt_segment blue $PRIMARY_FG ' ◆ %~'
+        ;;
+        $HOME/img*)
+            prompt_segment blue $PRIMARY_FG '  %~'
+        ;;
+        *)
+            #prompt_segment white black '%~'
+            prompt_segment blue $PRIMARY_FG ' %~ '
+        ;;
+    esac
+    
 }
 
 prompt_history() {
@@ -183,25 +117,59 @@ prompt_history() {
     prompt_segment black grey "$hist_no"
 }
 
-build_prompt() {
+## Status:
+# - was there an error
+# - am I root
+# - are there background jobs?
+prompt_status() {
+    local symbols
+    symbols=()
+    [[ $RETVAL -ne 0 ]] && symbols+="%{%F{red}%}$CROSS"
+    [[ $UID -eq 0 ]] && symbols+="%{%F{yellow}%}$LIGHTNING"
+    [[ $(jobs -l | wc -l) -gt 0 ]] && symbols+="%{%F{cyan}%}$GEAR"
+    [[ -n "$symbols" ]] && prompt_segment $PRIMARY_FG default " $symbols "
+}
+
+prompt_void_main() {
     RETVAL=$?
-    prompt_time
-    prompt_virtualenv
-    prompt_context
+    CURRENT_BG='NONE'
+    #prompt_time
+    #prompt_virtualenv
     #prompt_history
+    prompt_status
+    prompt_context
     prompt_dir
     prompt_git
-    prompt_status
     prompt_end
 }
-PROMPT='%{%f%b%k%}$(build_prompt) '
 
-build_rprompt() {
-    #RETVAL=$?
-    prompt_history
-    prompt_time
-    #prompt_end
+prompt_void_precmd() {
+    vcs_info
+    PROMPT='%{%f%b%k%}$(prompt_void_main) '
 }
+
+prompt_void_setup() {
+    autoload -Uz add-zsh-hook
+    autoload -Uz vcs_info
+    
+    prompt_opts=(cr subst percent)
+    
+    add-zsh-hook precmd prompt_void_precmd
+    
+    zstyle ':vcs_info:*' enable git
+    zstyle ':vcs_info:*' check-for-changes false
+    zstyle ':vcs_info:git*' formats '%b'
+    zstyle ':vcs_info:git*' actionformats '%b (%a)'
+}
+
+prompt_void_setup "$@"
+
+# build_rprompt() {
+#     #RETVAL=$?
+#     prompt_history
+#     prompt_time
+#     #prompt_end
+# }
 # RPROMPT='[%*]'
 # RPROMPT="$(date +%R:%S)"
 #RPROMPT='$(build_rprompt)'
